@@ -107,3 +107,54 @@ const TaskService = {
     Tasks.Tasks.remove(sourceListId, task.id);
   },
 };
+
+/**
+ * A service for interacting with completed Google Tasks.
+ */
+const CompletedTaskService = {
+  /**
+   * Retrieves all completed tasks from a specific list.
+   * @param {string} listId The ID of the list.
+   * @returns {Array<GoogleAppsScript.Tasks.Schema.Task>} An array of completed Task objects.
+   */
+  listCompletedTasks(listId) {
+    let allTasks = [];
+    let pageToken = null;
+    // Fetch ALL tasks, we will filter for completed ones in the script.
+    const options = {
+      maxResults: 100,
+      showHidden: true, // This is required to force the API to show all tasks.
+    };
+
+    do {
+      if (pageToken) {
+        options.pageToken = pageToken;
+      }
+      const result = Tasks.Tasks.list(listId, options);
+      if (result.items) {
+        allTasks = allTasks.concat(result.items);
+      }
+      pageToken = result.nextPageToken;
+    } while (pageToken);
+
+    // Manually filter for completed tasks to bypass the unreliable API parameter.
+    return allTasks.filter(task => task.status === 'completed');
+  },
+
+  /**
+   * Retrieves completed tasks from a list and formats them into a JSON object.
+   * @param {string} listId The ID of the list.
+   * @returns {object} A JSON object where keys are task titles and values are their completion timestamps.
+   */
+  getCompletedTasksFromList(listId) {
+    const completedTasks = this.listCompletedTasks(listId);
+    const formattedTasks = [];
+    for (const task of completedTasks) {
+      formattedTasks.push({
+        'taskName': task.title,
+        'completed_timestamp': task.completed,
+      });
+    }
+    return formattedTasks;
+  },
+};

@@ -9,7 +9,7 @@
  */
 const LoggingSheetUtil = {
   SHEET_NAME: 'Runs', // The required name for the logging tab in the sheet.
-  HEADER_ROW: ['Timestamp', 'InboxAdds', 'ListDeleted', 'ListCreated', 'Notes'],
+  HEADER_ROW: ['Timestamp', 'InboxAdds', 'ListDeleted', 'ListCreated', 'CompletedTasks', 'Notes'],
 
   /**
    * Ensures the logging sheet and its header row are correctly set up.
@@ -67,6 +67,7 @@ const LoggingSheetUtil = {
         inboxAdds: stats.inboxAdds || 0,
         listDeleted: stats.listDeleted || 0,
         listCreated: stats.listCreated || 0,
+        completedTasks: JSON.stringify(stats.completedTasks || []),
         notes: stats.notes || ''
       };
 
@@ -76,6 +77,7 @@ const LoggingSheetUtil = {
         rowData.inboxAdds,
         rowData.listDeleted,
         rowData.listCreated,
+        rowData.completedTasks,
         rowData.notes,
       ]);
     } catch (e) {

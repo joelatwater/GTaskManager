@@ -61,6 +61,7 @@ function rolloverProcess(todayTitle, startTime) {
     inboxAdds: 0,
     listDeleted: 0,
     listCreated: 0,
+    completedTasks: [],
     notes: '',
   };
 
@@ -101,6 +102,9 @@ function rolloverProcess(todayTitle, startTime) {
     
     const movedCount = migrateIncompleteTasks(staleList.id, inboxId);
     stats.inboxAdds += movedCount;
+
+    const completedTasks = CompletedTaskService.getCompletedTasksFromList(staleList.id);
+    stats.completedTasks = stats.completedTasks.concat(completedTasks);
 
     ListService.deleteList(staleList.id);
     stats.listDeleted++;

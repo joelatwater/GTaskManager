@@ -7,7 +7,8 @@ GTaskManager is a Google Apps Script that automates your daily task management w
 ## Key Features
 
 - **Automated Daily Rollover:** Moves all unfinished tasks from dated lists to your Inbox.
-- **Daily List Creation:** Automatically creates a new list for the current day (e.g., `[Daily] July 08, 2025`).
+- **Inbox Processing (New!):** Automatically moves non-recurring tasks due *today* from your Inbox to the new daily list.
+- **Daily List Creation:** Automatically creates a new list for the current day (e.g., `[Daily] July 10, 2025`).
 - **Weekly Email Digest:** Sends a summary of completed and "procrastinated" tasks.
 - **Rollover Tracking:** Tracks how many times a task has been rolled over, adding a "Rollover Count" to the task's notes.
 - **Timeout Protection:** Intelligently pauses execution on large backlogs to prevent Google Apps Script timeouts.
@@ -26,8 +27,9 @@ This is the easiest way to get started.
 
 2.  **Copy the Code:**
     *   Delete the default `Code.gs` file.
-    *   Create new script files for each `.js` file in this repository (`main.js`, `config.js`, `services.js`, `logging.js`, `digest.js`, and `testing_utils.js`).
-    *   Copy the contents of each file from this repository into the corresponding file in your Apps Script project.
+    *   Create new script files for each `.js` file in this repository. **Important:** When creating files in the Apps Script editor, name them without the `.js` extension (e.g., create a file named `main`, not `main.js`). The editor will automatically add the `.gs` extension.
+    *   Create the following files: `main`, `config`, `services`, `logging`, `digest`, and `testing_utils`.
+    *   Copy the contents of each corresponding `.js` file from this repository into the newly created files in your Apps Script project.
 
 3.  **Enable Google Tasks API:**
     *   In the Apps Script Editor sidebar, click **Services +**.
@@ -46,7 +48,7 @@ That's it! The script is now fully configured and will run automatically every d
 
 ### Option 2: Command-Line Installation (using clasp)
 
-This option is for developers familiar with the command line.
+This option is for developers familiar with the command line. **Note:** `clasp` automatically handles file extension conversion between `.js` (local) and `.gs` (Apps Script) - no manual changes needed.
 
 1.  **Install `clasp`:**
     *   `npm install -g @google/clasp`
@@ -66,12 +68,25 @@ This option is for developers familiar with the command line.
 5.  **Complete Setup in Editor:**
     *   In the Apps Script editor, follow the instructions for the **Automated Setup** (Option 1) starting from Step 3.
 
+## File Extensions Note
+
+This repository contains `.js` files for compatibility with `clasp` (Google's command-line tool). However, there are important differences to understand:
+
+- **Repository files:** Use `.js` extensions for local development and clasp compatibility
+- **Apps Script web editor:** Automatically uses `.gs` extensions for all script files
+- **Content:** The JavaScript code is identical regardless of extension - both `.js` and `.gs` files work the same way
+
+**For manual installation (Option 1):** When creating files in the web editor, name them without any extension (e.g., `main`, not `main.js`). The editor automatically adds `.gs`.
+
+**For clasp installation (Option 2):** The tool automatically handles extension conversion - no manual changes needed.
+
 ## Configuration (Optional)
 
 The `setup` function handles all required configuration. However, you can optionally add the following keys to the **Script Properties** (under **Project Settings** ⚙️) to customize the script's behavior.
 
 | Key | Default Value | Description |
 | :--- | :--- | :--- |
+| `AUTO_MOVE_DUE_TASKS` | `true` | **(New!)** Set to `false` to disable moving tasks due today from the Inbox. |
 | `INBOX_LIST_NAME` | `Inbox` | The **exact name** of the task list where unfinished items are moved. |
 | `DAILY_LIST_PREFIX` | `[Daily]` | The prefix used to identify and manage daily lists. |
 | `LOCAL_TIME_ZONE` | Your Account TZ | Your IANA Time Zone (e.g., "America/New_York") to ensure dates are correct. |

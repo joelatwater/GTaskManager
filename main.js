@@ -6,8 +6,8 @@
 
 /**
  * The main entry point for the script, intended to be called by a daily time-driven trigger.
- * This function manages locking to prevent concurrent runs, orchestrates the daily rollover
- * process, logs the results, and triggers the weekly digest email.
+ * This function manages locking, orchestrates the daily rollover, processes the inbox,
+ * logs the results, and triggers the weekly digest email.
  */
 function dailyRunner() {
   const lock = LockService.getScriptLock();
@@ -16,112 +16,124 @@ function dailyRunner() {
     return;
   }
 
-  const startTime = new Date(); // Start timer for execution safeguard
+  const startTime = new Date();
+  const stats = {
+    timestamp: startTime,
+    inboxAdds: 0,
+    listDeleted: 0,
+    listCreated: 0,
+    inboxMoves: 0, // New stat for this feature
+    completedTasks: [],
+    notes: '',
+  };
 
   try {
     const tz = getLocalTimeZone();
     const todayTitle = Utilities.formatDate(startTime, tz, 'MMMM d, yyyy');
 
-    // Run the core process and get statistics back
-    const stats = rolloverProcess(todayTitle, startTime);
+    // Core processes
+    const { todayListId, inboxId } = rolloverProcess(todayTitle, startTime, stats);
+
+    if (getAutoMoveDueTasks()) {
+      processInboxTasks(todayListId, inboxId, stats);
+    }
+
     LoggingSheetUtil.logRun(stats);
 
-    // Check if today is the day for the weekly digest
     if (startTime.getDay() == getWeeklyDigestDay()) {
       DigestMailer.sendWeeklyDigest();
     }
 
   } catch (e) {
-    // Global error handler for any uncaught exceptions
     console.error(`Fatal error in dailyRunner: ${e.message}\n${e.stack}`);
-    LoggingSheetUtil.logRun({ notes: `FATAL: ${e.message}` });
+    stats.notes = `FATAL: ${e.message}`;
+    LoggingSheetUtil.logRun(stats); // Log the failure
     GmailApp.sendEmail(
       Session.getEffectiveUser().getEmail(),
       'Google Tasks Script has failed!',
       `The daily task rollover script encountered a fatal error and could not complete.\n\nError: ${e.message}`
     );
   } finally {
-    // Always release the lock to ensure future runs are not blocked
     lock.releaseLock();
   }
 }
 
 /**
- * Orchestrates the daily rollover process.
- * This function finds stale daily lists, migrates their incomplete tasks, deletes them,
- * and ensures a list for the current day exists.
- * @param {string} todayTitle The formatted title for today's list (e.g., "July 08, 2025").
- * @param {Date} startTime The time the script began execution, used for the timeout safeguard.
- * @returns {object} A statistics object summarizing the run for logging purposes.
- * @throws {Error} If the designated Inbox list cannot be found.
+ * Orchestrates the daily rollover process: finds and deletes stale lists,
+ * migrating their incomplete tasks to the inbox.
+ * @param {string} todayTitle The formatted title for today's list.
+ * @param {Date} startTime The script start time, for the timeout safeguard.
+ * @param {object} stats The statistics object to be updated.
+ * @returns {{todayListId: string, inboxId: string}} The IDs of the critical lists.
  */
-function rolloverProcess(todayTitle, startTime) {
-  const stats = {
-    timestamp: startTime,
-    inboxAdds: 0,
-    listDeleted: 0,
-    listCreated: 0,
-    completedTasks: [],
-    notes: '',
-  };
-
-  LoggingSheetUtil.setup(); // Ensure the logging sheet is ready
+function rolloverProcess(todayTitle, startTime, stats) {
+  LoggingSheetUtil.setup();
 
   const dailyListPrefix = getDailyListPrefix();
   const todayListFullName = `${dailyListPrefix} ${todayTitle}`;
 
   const inboxList = ListService.getListByTitle(getInboxListName());
   if (!inboxList) {
-    throw new Error(`Inbox list "${getInboxListName()}" not found. Please check your configuration.`);
+    throw new Error(`Inbox list "${getInboxListName()}" not found.`);
   }
   const inboxId = inboxList.id;
 
   const allLists = ListService.listAll();
-  const staleLists = [];
-  let todayList = null;
+  let todayList = allLists.find(list => list.title === todayListFullName);
+  const staleLists = allLists.filter(list => 
+    list.title.startsWith(dailyListPrefix) && list.title !== todayListFullName
+  );
 
-  // Partition lists into today's list and stale lists
-  for (const list of allLists) {
-    if (list.title.startsWith(dailyListPrefix)) {
-      if (list.title === todayListFullName) {
-        todayList = list;
-      } else {
-        staleLists.push(list);
-      }
-    }
-  }
-
-  // Process each stale list, respecting the execution timeout
   const timeoutSeconds = getExecutionTimeoutSeconds();
   for (const staleList of staleLists) {
     if ((new Date() - startTime) / 1000 > timeoutSeconds) {
-      stats.notes = 'Run paused due to execution timeout.';
-      console.warn('Execution time exceeded. Pausing run.');
-      break; // Exit loop cleanly
+      stats.notes = 'Run paused during rollover due to execution timeout.';
+      console.warn('Execution time exceeded during rollover. Pausing run.');
+      break;
     }
-    
-    const movedCount = migrateIncompleteTasks(staleList.id, inboxId);
-    stats.inboxAdds += movedCount;
-
-    const completedTasks = CompletedTaskService.getCompletedTasksFromList(staleList.id);
-    stats.completedTasks = stats.completedTasks.concat(completedTasks);
-
+    stats.inboxAdds += migrateIncompleteTasks(staleList.id, inboxId);
+    stats.completedTasks.push(...CompletedTaskService.getCompletedTasksFromList(staleList.id));
     ListService.deleteList(staleList.id);
     stats.listDeleted++;
   }
 
-  // Ensure today's list exists, creating it if necessary
   if (!todayList) {
     todayList = ListService.createList(todayListFullName);
     stats.listCreated++;
   }
 
-  // If the run completed without other notes (e.g., a timeout), create a summary.
-  if (!stats.notes) {
-    stats.notes = `Run completed successfully. Tasks moved: ${stats.inboxAdds}. Lists deleted: ${stats.listDeleted}.`;
-  }
-  return stats;
+  return { todayListId: todayList.id, inboxId };
 }
+
+/**
+ * Moves non-recurring tasks due today from the Inbox to today's daily list.
+ * @param {string} todayListId The ID of the list for today's tasks.
+ * @param {string} inboxId The ID of the Inbox list.
+ * @param {object} stats The statistics object to be updated.
+ */
+function processInboxTasks(todayListId, inboxId, stats) {
+  const tasks = TaskService.listAllTasks(inboxId);
+  const today = new Date();
+  const todayDateString = Utilities.formatDate(today, getLocalTimeZone(), 'yyyy-MM-dd');
+
+  for (const task of tasks) {
+    // Skip tasks with no due date or that have a recurrence rule
+    if (!task.due || task.recurrence) {
+      continue;
+    }
+
+    // Google Tasks API returns 'due' as an RFC 3339 timestamp (e.g., "2025-07-10T00:00:00.000Z")
+    // We only care about the date part.
+    const taskDueDate = task.due.substring(0, 10);
+
+    if (taskDueDate === todayDateString) {
+      TaskService.move(task, inboxId, todayListId);
+      stats.inboxMoves++;
+    }
+  }
+  console.log(`Moved ${stats.inboxMoves} tasks due today from Inbox to the daily list.`);
+}
+
 
 /**
  * Migrates all incomplete tasks from a source list to a destination list.
@@ -132,32 +144,23 @@ function rolloverProcess(todayTitle, startTime) {
  */
 function migrateIncompleteTasks(sourceListId, destListId) {
   const tasksToMove = TaskService.listIncompleteTasks(sourceListId);
-  let movedCount = 0;
   const trackRollover = getTrackRolloverCount();
 
   for (const task of tasksToMove) {
     if (trackRollover) {
       let notes = task.notes || "";
       const match = notes.match(/Rollover Count: (\d+)/);
-
       if (match) {
         const count = parseInt(match[1], 10) + 1;
         notes = notes.replace(/Rollover Count: \d+/, `Rollover Count: ${count}`);
       } else {
         notes += (notes ? "\n\n" : "") + "Rollover Count: 1";
       }
-      
-      // Update the task notes in place before moving
-      // The updated task object is returned and used in the move operation
       const updatedTask = TaskService.updateNotes(sourceListId, task.id, notes);
       TaskService.move(updatedTask, sourceListId, destListId);
     } else {
-      // If not tracking, move the original task
       TaskService.move(task, sourceListId, destListId);
     }
-    movedCount++;
   }
-
-  console.log(`Moved ${movedCount} incomplete tasks from list ${sourceListId}.`);
-  return movedCount;
+  return tasksToMove.length;
 }
